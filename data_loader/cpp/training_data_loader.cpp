@@ -388,6 +388,61 @@ struct PP_3WideExtractor: IFeatureExtractor {
     }
 };
 
+struct MatConfig {
+    static constexpr std::string_view NAME = "MatConfig";
+
+    static constexpr int CONFIGS             = 3 * 3 * 3 * 3 * 5 * 5;
+    static constexpr int OWN_BISHOP_PAIR     = CONFIGS;
+    static constexpr int THEIR_BISHOP_PAIR   = CONFIGS + 1;
+    static constexpr int OPPOSITE_BISHOPS    = CONFIGS + 2;
+    static constexpr int INPUTS              = CONFIGS + 3;
+    static constexpr int MAX_ACTIVE_FEATURES = 4;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos    = e.pos;
+        auto  count  = [&](PieceType pt, Color c) { return pos.piecesBB(Piece(pt, c)).count(); };
+        auto  minors = [&](Color c) {
+            return std::min(count(PieceType::Knight, c) + count(PieceType::Bishop, c), 4);
+        };
+
+        const Color us   = color;
+        const Color them = !color;
+
+        const int queens_us   = std::min(count(PieceType::Queen, us), 2);
+        const int queens_them = std::min(count(PieceType::Queen, them), 2);
+        const int rooks_us    = std::min(count(PieceType::Rook, us), 2);
+        const int rooks_them  = std::min(count(PieceType::Rook, them), 2);
+
+        int k = 0;
+        features[k++] =
+          ((((queens_us * 3 + queens_them) * 3 + rooks_us) * 3 + rooks_them) * 5 + minors(us)) * 5
+          + minors(them);
+
+        const Bitboard bishops_us   = pos.piecesBB(Piece(PieceType::Bishop, us));
+        const Bitboard bishops_them = pos.piecesBB(Piece(PieceType::Bishop, them));
+
+        if (bishops_us.count() >= 2)
+            features[k++] = OWN_BISHOP_PAIR;
+        if (bishops_them.count() >= 2)
+            features[k++] = THEIR_BISHOP_PAIR;
+        if (bishops_us.count() == 1 && bishops_them.count() == 1
+            && bishops_us.first().color() != bishops_them.first().color())
+            features[k++] = OPPOSITE_BISHOPS;
+
+        return {k, INPUTS};
+    }
+};
+
+struct MatConfigExtractor: IFeatureExtractor {
+    int inputs() const override { return MatConfig::INPUTS; }
+    int max_active_features() const override { return MatConfig::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return MatConfig::fill_features_sparse(e, features, color);
+    }
+};
+
 struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
     int                                             m_inputs;
@@ -437,6 +492,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<FullThreatsExtractor>();
     if (name == "PP_3Wide")
         return std::make_unique<PP_3WideExtractor>();
+    if (name == "MatConfig")
+        return std::make_unique<MatConfigExtractor>();
     return nullptr;
 }
 
